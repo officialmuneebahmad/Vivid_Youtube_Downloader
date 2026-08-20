@@ -219,8 +219,12 @@ bool SetupDependencies(HWND hWndParent, std::atomic<bool>& cancelFlag) {
     return true;
 }
 
-static void ProcessLine(HWND hWndParent, const std::string& line, std::string& videoTitle) {
+static void ProcessLine(HWND hWndParent, const std::string& line, std::string& videoTitle, std::string& lastErrorMsg) {
     if (line.empty()) return;
+
+    if (line.find("ERROR:") != std::string::npos) {
+        lastErrorMsg = line;
+    }
 
     if (line.find("[download]") != std::string::npos) {
         size_t pctPos = line.find('%');
@@ -367,6 +371,7 @@ bool DownloadVideo(HWND hWndParent,
     DWORD bytesRead = 0;
     std::string lineBuffer = "";
     std::string videoTitle = "YouTube Video";
+    std::string lastErrorMsg = "";
 
     while (ReadFile(hChildStd_OUT_Rd, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
         if (cancelFlag) {
@@ -388,13 +393,13 @@ bool DownloadVideo(HWND hWndParent,
         while ((pos = lineBuffer.find_first_of("\r\n")) != std::string::npos) {
             std::string line = lineBuffer.substr(0, pos);
             lineBuffer.erase(0, pos + 1);
-            ProcessLine(hWndParent, line, videoTitle);
+            ProcessLine(hWndParent, line, videoTitle, lastErrorMsg);
         }
     }
 
     // Process remainder of buffer
     if (!lineBuffer.empty()) {
-        ProcessLine(hWndParent, lineBuffer, videoTitle);
+        ProcessLine(hWndParent, lineBuffer, videoTitle, lastErrorMsg);
     }
 
     CloseHandle(hChildStd_OUT_Rd);
@@ -411,7 +416,13 @@ bool DownloadVideo(HWND hWndParent,
         PostMessage(hWndParent, WM_DOWNLOAD_COMPLETE, 1, (LPARAM)pTitle);
         return true;
     } else {
-        std::string* pErr = new std::string("yt-dlp exited with error " + std::to_string(exitCode));
+        std::string errStr;
+        if (!lastErrorMsg.empty()) {
+            errStr = lastErrorMsg;
+        } else {
+            errStr = "yt-dlp exited with error " + std::to_string(exitCode);
+        }
+        std::string* pErr = new std::string(errStr);
         PostMessage(hWndParent, WM_DOWNLOAD_COMPLETE, 0, (LPARAM)pErr);
         return false;
     }
