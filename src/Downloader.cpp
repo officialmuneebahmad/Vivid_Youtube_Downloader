@@ -294,7 +294,7 @@ bool DownloadVideo(HWND hWndParent,
     std::string ytDlpPath = GetYtDlpPath();
     std::string ffmpegPath = GetFFmpegPath();
 
-    std::string cmd = "\"" + ytDlpPath + "\" --newline --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
+    std::string cmd = "\"" + ytDlpPath + "\" --newline --no-cache-dir --js-runtimes node --extractor-args \"youtube:player_client=web_embedded,web,android\" --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
     
     if (!ffmpegPath.empty()) {
         size_t lastSlash = ffmpegPath.find_last_of("\\/");
@@ -335,12 +335,16 @@ bool DownloadVideo(HWND hWndParent,
     HANDLE hChildStd_OUT_Wr = NULL;
 
     if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0)) {
+        std::string* pErr = new std::string("Failed to create redirection pipe.");
+        PostMessage(hWndParent, WM_DOWNLOAD_COMPLETE, 0, (LPARAM)pErr);
         return false;
     }
 
     if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)) {
         CloseHandle(hChildStd_OUT_Rd);
         CloseHandle(hChildStd_OUT_Wr);
+        std::string* pErr = new std::string("Failed to set pipe handle options.");
+        PostMessage(hWndParent, WM_DOWNLOAD_COMPLETE, 0, (LPARAM)pErr);
         return false;
     }
 
@@ -361,6 +365,8 @@ bool DownloadVideo(HWND hWndParent,
     if (!CreateProcessA(NULL, cmdLine, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         CloseHandle(hChildStd_OUT_Rd);
         CloseHandle(hChildStd_OUT_Wr);
+        std::string* pErr = new std::string("Failed to launch download engine (CreateProcess failed).");
+        PostMessage(hWndParent, WM_DOWNLOAD_COMPLETE, 0, (LPARAM)pErr);
         return false;
     }
 
