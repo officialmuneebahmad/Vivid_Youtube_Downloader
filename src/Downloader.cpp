@@ -32,12 +32,6 @@ std::string GetYtDlpPath() {
         }
     }
 
-    // 2. System PATH (fallback if user has python)
-    char pathBuffer[MAX_PATH];
-    if (SearchPathA(NULL, "python", ".exe", MAX_PATH, pathBuffer, NULL) > 0) {
-        return std::string(pathBuffer);
-    }
-
     return "";
 }
 
@@ -188,6 +182,7 @@ bool SetupDependencies(HWND hWndParent, std::atomic<bool>& cancelFlag) {
             "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'python\\get-pip.py'; " +
             ".\\python\\python.exe .\\python\\get-pip.py --no-warn-script-location; " +
             ".\\python\\python.exe -m pip install yt-dlp yt-dlp-getpot-wpc nodriver --no-warn-script-location; " +
+            "(Get-Content -Path '.\\python\\Lib\\site-packages\\yt_dlp_plugins\\extractor\\getpot_wpc.py') -replace 'headless=False', 'headless=True' | Set-Content -Path '.\\python\\Lib\\site-packages\\yt_dlp_plugins\\extractor\\getpot_wpc.py'; " +
             "Remove-Item -Force 'python.zip';\"";
 
         if (!RunCommandHidden(setupCmd)) {
@@ -301,7 +296,7 @@ bool DownloadVideo(HWND hWndParent,
     std::string ytDlpPath = GetYtDlpPath(); // This is now python.exe
     std::string ffmpegPath = GetFFmpegPath();
 
-    std::string cmd = "\"" + ytDlpPath + "\" -m yt_dlp --update --newline --no-cache-dir --js-runtimes node --extractor-args \"youtube:player_client=web_embedded,web,android\" --extractor-args \"youtube-wpc:mint_player=True\" --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
+    std::string cmd = "\"" + ytDlpPath + "\" -m yt_dlp --update --newline --no-cache-dir --js-runtimes node --remote-components ejs:github --extractor-args \"youtube:player_client=web_embedded,web,android\" --extractor-args \"youtube-wpc:mint_player=True\" --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
     
     if (!ffmpegPath.empty()) {
         size_t lastSlash = ffmpegPath.find_last_of("\\/");
@@ -320,14 +315,14 @@ bool DownloadVideo(HWND hWndParent,
     cmd += "-o \"downloads/%(title)s.%(ext)s\" ";
 
     switch (qualityIndex) {
-        case 0: cmd += "-f \"bestvideo+bestaudio/best\" --merge-output-format mp4 "; break;
-        case 1: cmd += "-f \"bestvideo[height<=1080]+bestaudio/best[ext=m4a]/best\" --merge-output-format mp4 "; break;
-        case 2: cmd += "-f \"bestvideo[height<=720]+bestaudio/best[ext=m4a]/best\" --merge-output-format mp4 "; break;
-        case 3: cmd += "-f \"bestvideo[height<=480]+bestaudio/best[ext=m4a]/best\" --merge-output-format mp4 "; break;
+        case 0: cmd += "-S \"res,ext:mp4:m4a\" --merge-output-format mp4 "; break;
+        case 1: cmd += "-S \"res:1080,ext:mp4:m4a\" --merge-output-format mp4 "; break;
+        case 2: cmd += "-S \"res:720,ext:mp4:m4a\" --merge-output-format mp4 "; break;
+        case 3: cmd += "-S \"res:480,ext:mp4:m4a\" --merge-output-format mp4 "; break;
         case 4: cmd += "-x --audio-format mp3 --audio-quality 0 "; break;
         case 5: cmd += "-x --audio-format mp3 --audio-quality 5 "; break;
         case 6: cmd += "-f \"bestaudio[ext=m4a]/best\" "; break;
-        default: cmd += "-f \"bestvideo+bestaudio/best\" --merge-output-format mp4 "; break;
+        default: cmd += "-S \"res,ext:mp4:m4a\" --merge-output-format mp4 "; break;
     }
 
     cmd += "\"" + url + "\"";
