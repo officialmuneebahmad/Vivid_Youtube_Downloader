@@ -23,28 +23,19 @@ static std::string GetCentralFolder() {
 }
 
 std::string GetYtDlpPath() {
-    // 1. Current working directory
-    if (FileExists("yt-dlp.exe")) {
-        char absPath[MAX_PATH];
-        if (GetFullPathNameA("yt-dlp.exe", MAX_PATH, absPath, NULL) > 0) {
-            return std::string(absPath);
-        }
-        return ".\\yt-dlp.exe";
-    }
-
-    // 2. System PATH
-    char pathBuffer[MAX_PATH];
-    if (SearchPathA(NULL, "yt-dlp", ".exe", MAX_PATH, pathBuffer, NULL) > 0) {
-        return std::string(pathBuffer);
-    }
-
-    // 3. Centralized folder
+    // 1. Centralized folder
     std::string central = GetCentralFolder();
     if (!central.empty()) {
-        std::string centralPath = central + "\\yt-dlp.exe";
-        if (FileExists(centralPath)) {
-            return centralPath;
+        std::string pythonPath = central + "\\python\\python.exe";
+        if (FileExists(pythonPath)) {
+            return pythonPath;
         }
+    }
+
+    // 2. System PATH (fallback if user has python)
+    char pathBuffer[MAX_PATH];
+    if (SearchPathA(NULL, "python", ".exe", MAX_PATH, pathBuffer, NULL) > 0) {
+        return std::string(pathBuffer);
     }
 
     return "";
@@ -179,12 +170,28 @@ bool SetupDependencies(HWND hWndParent, std::atomic<bool>& cancelFlag) {
     }
 
     if (GetYtDlpPath().empty()) {
-        std::string* pMsg = new std::string("Setting up yt-dlp core engine... Please wait (this is a one-time setup).");
+        std::string* pMsg = new std::string("Setting up Python Engine... Please wait (this is a one-time setup).");
         PostMessage(hWndParent, WM_DOWNLOAD_PROGRESS, (WPARAM)0, (LPARAM)pMsg);
         
-        std::string ytDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
-        std::string targetYtDlp = central + "\\yt-dlp.exe";
-        if (!DownloadFileWinInet(hWndParent, ytDlpUrl, targetYtDlp, "yt-dlp core engine", cancelFlag)) {
+        std::string pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip";
+        std::string targetPythonZip = central + "\\python.zip";
+        if (!DownloadFileWinInet(hWndParent, pythonUrl, targetPythonZip, "Python Engine", cancelFlag)) {
+            return false;
+        }
+
+        pMsg = new std::string("Configuring Python and installing yt-dlp + WPC Plugin... This may take a minute.");
+        PostMessage(hWndParent, WM_DOWNLOAD_PROGRESS, (WPARAM)20, (LPARAM)pMsg);
+
+        std::string setupCmd = "powershell -Command \"Set-Location -Path '" + central + "'; " +
+            "Expand-Archive -Path 'python.zip' -DestinationPath 'python' -Force; " +
+            "(Get-Content -Path 'python\\python311._pth') -replace '#import site', 'import site' | Set-Content -Path 'python\\python311._pth'; " +
+            "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'python\\get-pip.py'; " +
+            ".\\python\\python.exe .\\python\\get-pip.py --no-warn-script-location; " +
+            ".\\python\\python.exe -m pip install yt-dlp yt-dlp-getpot-wpc nodriver --no-warn-script-location; " +
+            "Remove-Item -Force 'python.zip';\"";
+
+        if (!RunCommandHidden(setupCmd)) {
+            DeleteFileA(targetPythonZip.c_str());
             return false;
         }
     }
@@ -291,10 +298,10 @@ bool DownloadVideo(HWND hWndParent,
     (void)forceMp3; // Suppress unused parameter warning
     CreateDirectoryA("downloads", NULL);
 
-    std::string ytDlpPath = GetYtDlpPath();
+    std::string ytDlpPath = GetYtDlpPath(); // This is now python.exe
     std::string ffmpegPath = GetFFmpegPath();
 
-    std::string cmd = "\"" + ytDlpPath + "\" --newline --no-cache-dir --js-runtimes node --extractor-args \"youtube:player_client=web_embedded,web,android\" --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
+    std::string cmd = "\"" + ytDlpPath + "\" -m yt_dlp --update --newline --no-cache-dir --js-runtimes node --extractor-args \"youtube:player_client=web_embedded,web,android\" --extractor-args \"youtube-wpc:mint_player=True\" --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
     
     if (!ffmpegPath.empty()) {
         size_t lastSlash = ffmpegPath.find_last_of("\\/");
