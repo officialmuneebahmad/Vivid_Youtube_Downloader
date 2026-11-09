@@ -16,6 +16,7 @@
 // Application and portable path helpers
 std::string GetAppDir();
 std::string GetDownloadsDir();
+std::string GetHistoryFilePath();
 
 // Resolve absolute paths to yt-dlp.exe and ffmpeg.exe
 std::string GetYtDlpPath();

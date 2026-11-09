@@ -503,8 +503,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 SendMessage(g_hProgressBar, PBM_SETRANGE32, 0, 100);
 
                 std::string title = (pMsg) ? *pMsg : "YouTube Video";
-                SetWindowTextA(g_hStatusLabel, "Status: Download complete! Saved to downloads\\");
-                MessageBoxA(hWnd, "Download successfully finished!\nFile saved in the 'downloads' directory.", "Success", MB_OK | MB_ICONINFORMATION);
+                std::string dlFolder = GetDownloadsDir();
+                SetWindowTextA(g_hStatusLabel, "Status: Download complete!");
+                MessageBoxA(hWnd, ("Download successfully finished!\n\nSaved to:\n" + dlFolder).c_str(), "Success", MB_OK | MB_ICONINFORMATION);
                 
                 AddHistoryEntry(title, qualStr, "Success");
             } else {

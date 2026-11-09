@@ -6,9 +6,6 @@
 #include <algorithm>
 #include <iomanip>
 
-static std::string GetHistoryFilePath() {
-    return GetAppDir() + "\\history.txt";
-}
 static const char DELIMITER = '\t';
 
 // Helper to replace character

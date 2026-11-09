@@ -33,6 +33,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[Dirs]
+Name: "{app}"; Permissions: users-modify
+
 [Files]
 Source: "yt-downloader.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "yt-dlp.exe"; DestDir: "{app}"; Flags: ignoreversion

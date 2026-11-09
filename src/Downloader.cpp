@@ -25,12 +25,6 @@ std::string GetAppDir() {
     return ".";
 }
 
-std::string GetDownloadsDir() {
-    std::string dir = GetAppDir() + "\\downloads";
-    CreateDirectoryA(dir.c_str(), NULL);
-    return dir;
-}
-
 static std::string GetCentralFolder() {
     char localAppData[MAX_PATH];
     if (GetEnvironmentVariableA("LOCALAPPDATA", localAppData, MAX_PATH) > 0) {
@@ -39,6 +33,83 @@ static std::string GetCentralFolder() {
         return path;
     }
     return "";
+}
+
+static bool IsDirectoryWritable(const std::string& dirPath) {
+    if (dirPath.empty()) return false;
+    CreateDirectoryA(dirPath.c_str(), NULL);
+    std::string testFile = dirPath + "\\.write_test.tmp";
+    HANDLE hFile = CreateFileA(testFile.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        CloseHandle(hFile);
+        return true;
+    }
+    return false;
+}
+
+static bool IsInProtectedDirectory(const std::string& path) {
+    char progFiles[MAX_PATH] = {0};
+    char progFilesX86[MAX_PATH] = {0};
+    char winDir[MAX_PATH] = {0};
+
+    GetEnvironmentVariableA("ProgramFiles", progFiles, MAX_PATH);
+    GetEnvironmentVariableA("ProgramFiles(x86)", progFilesX86, MAX_PATH);
+    GetEnvironmentVariableA("WINDIR", winDir, MAX_PATH);
+
+    if (strlen(progFiles) > 0 && path.compare(0, strlen(progFiles), progFiles) == 0) return true;
+    if (strlen(progFilesX86) > 0 && path.compare(0, strlen(progFilesX86), progFilesX86) == 0) return true;
+    if (strlen(winDir) > 0 && path.compare(0, strlen(winDir), winDir) == 0) return true;
+
+    return false;
+}
+
+static std::string GetUserDownloadsFolder() {
+    char userProfile[MAX_PATH] = {0};
+    if (GetEnvironmentVariableA("USERPROFILE", userProfile, MAX_PATH) > 0) {
+        std::string dl = std::string(userProfile) + "\\Downloads\\Vivid Downloads";
+        CreateDirectoryA(dl.c_str(), NULL);
+        return dl;
+    }
+    return "";
+}
+
+std::string GetDownloadsDir() {
+    std::string appDir = GetAppDir();
+
+    // 1. If running portably (not in Program Files / Windows) and writable, use <AppDir>\downloads
+    if (!IsInProtectedDirectory(appDir)) {
+        std::string portableDir = appDir + "\\downloads";
+        if (IsDirectoryWritable(portableDir)) {
+            return portableDir;
+        }
+    }
+
+    // 2. If installed in Program Files or portable dir is not writable:
+    // Use the user's standard Downloads folder: %USERPROFILE%\Downloads\Vivid Downloads
+    std::string userDl = GetUserDownloadsFolder();
+    if (!userDl.empty() && IsDirectoryWritable(userDl)) {
+        return userDl;
+    }
+
+    // 3. Fallback to %LOCALAPPDATA%\VividDownloader\downloads
+    std::string central = GetCentralFolder() + "\\downloads";
+    CreateDirectoryA(central.c_str(), NULL);
+    return central;
+}
+
+std::string GetHistoryFilePath() {
+    std::string appDir = GetAppDir();
+
+    if (!IsInProtectedDirectory(appDir) && IsDirectoryWritable(appDir)) {
+        return appDir + "\\history.txt";
+    }
+
+    std::string central = GetCentralFolder();
+    if (!central.empty()) {
+        return central + "\\history.txt";
+    }
+
+    return appDir + "\\history.txt";
 }
 
 std::string GetYtDlpPath() {
