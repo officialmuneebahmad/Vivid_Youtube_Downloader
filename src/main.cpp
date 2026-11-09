@@ -430,8 +430,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 }
 
                 case IDC_SHOW_DOWNLOADS_BTN: {
-                    CreateDirectoryA("downloads", NULL);
-                    ShellExecuteA(NULL, "open", "downloads", NULL, NULL, SW_SHOWDEFAULT);
+                    std::string dlDir = GetDownloadsDir();
+                    ShellExecuteA(NULL, "open", dlDir.c_str(), NULL, NULL, SW_SHOWDEFAULT);
                     break;
                 }
             }

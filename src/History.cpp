@@ -1,11 +1,14 @@
 #include "History.h"
+#include "Downloader.h"
 #include <fstream>
 #include <sstream>
 #include <ctime>
 #include <algorithm>
 #include <iomanip>
 
-static const std::string HISTORY_FILE = "history.txt";
+static std::string GetHistoryFilePath() {
+    return GetAppDir() + "\\history.txt";
+}
 static const char DELIMITER = '\t';
 
 // Helper to replace character
@@ -18,7 +21,7 @@ static std::string CleanString(std::string str) {
 
 std::vector<HistoryEntry> LoadHistory() {
     std::vector<HistoryEntry> history;
-    std::ifstream file(HISTORY_FILE);
+    std::ifstream file(GetHistoryFilePath());
     if (!file.is_open()) {
         return history;
     }
@@ -43,7 +46,7 @@ std::vector<HistoryEntry> LoadHistory() {
 }
 
 void SaveHistory(const std::vector<HistoryEntry>& history) {
-    std::ofstream file(HISTORY_FILE, std::ios::trunc);
+    std::ofstream file(GetHistoryFilePath(), std::ios::trunc);
     if (!file.is_open()) return;
 
     for (const auto& entry : history) {
@@ -64,7 +67,7 @@ void AddHistoryEntry(const std::string& title, const std::string& quality, const
     ss << std::put_time(tm_struct, "%Y-%m-%d %H:%M:%S");
     std::string dateStr = ss.str();
 
-    std::ofstream file(HISTORY_FILE, std::ios::app);
+    std::ofstream file(GetHistoryFilePath(), std::ios::app);
     if (!file.is_open()) return;
 
     file << CleanString(dateStr) << DELIMITER
@@ -75,6 +78,6 @@ void AddHistoryEntry(const std::string& title, const std::string& quality, const
 }
 
 void ClearHistoryFile() {
-    std::ofstream file(HISTORY_FILE, std::ios::trunc);
+    std::ofstream file(GetHistoryFilePath(), std::ios::trunc);
     file.close();
 }

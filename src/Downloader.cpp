@@ -8,8 +8,27 @@
 #include <cstring>
 
 static bool FileExists(const std::string& path) {
+    if (path.empty()) return false;
     DWORD attrib = GetFileAttributesA(path.c_str());
     return (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+
+std::string GetAppDir() {
+    char exePath[MAX_PATH];
+    if (GetModuleFileNameA(NULL, exePath, MAX_PATH) > 0) {
+        std::string path(exePath);
+        size_t lastSlash = path.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            return path.substr(0, lastSlash);
+        }
+    }
+    return ".";
+}
+
+std::string GetDownloadsDir() {
+    std::string dir = GetAppDir() + "\\downloads";
+    CreateDirectoryA(dir.c_str(), NULL);
+    return dir;
 }
 
 static std::string GetCentralFolder() {
@@ -23,20 +42,49 @@ static std::string GetCentralFolder() {
 }
 
 std::string GetYtDlpPath() {
-    // 1. Centralized folder
+    // 1. Portable app directory (highest priority for true portability)
+    std::string appDir = GetAppDir();
+    std::string appPath = appDir + "\\yt-dlp.exe";
+    if (FileExists(appPath)) {
+        return appPath;
+    }
+
+    // 2. Current working directory
+    if (FileExists("yt-dlp.exe")) {
+        char absPath[MAX_PATH];
+        if (GetFullPathNameA("yt-dlp.exe", MAX_PATH, absPath, NULL) > 0) {
+            return std::string(absPath);
+        }
+        return ".\\yt-dlp.exe";
+    }
+
+    // 3. Centralized folder in %LOCALAPPDATA%
     std::string central = GetCentralFolder();
     if (!central.empty()) {
-        std::string pythonPath = central + "\\python\\python.exe";
-        if (FileExists(pythonPath)) {
-            return pythonPath;
+        std::string centralPath = central + "\\yt-dlp.exe";
+        if (FileExists(centralPath)) {
+            return centralPath;
         }
+    }
+
+    // 4. System PATH
+    char pathBuffer[MAX_PATH];
+    if (SearchPathA(NULL, "yt-dlp", ".exe", MAX_PATH, pathBuffer, NULL) > 0) {
+        return std::string(pathBuffer);
     }
 
     return "";
 }
 
 std::string GetFFmpegPath() {
-    // 1. Current working directory
+    // 1. Portable app directory (highest priority)
+    std::string appDir = GetAppDir();
+    std::string appPath = appDir + "\\ffmpeg.exe";
+    if (FileExists(appPath)) {
+        return appPath;
+    }
+
+    // 2. Current working directory
     if (FileExists("ffmpeg.exe")) {
         char absPath[MAX_PATH];
         if (GetFullPathNameA("ffmpeg.exe", MAX_PATH, absPath, NULL) > 0) {
@@ -45,19 +93,19 @@ std::string GetFFmpegPath() {
         return ".\\ffmpeg.exe";
     }
 
-    // 2. System PATH
-    char pathBuffer[MAX_PATH];
-    if (SearchPathA(NULL, "ffmpeg", ".exe", MAX_PATH, pathBuffer, NULL) > 0) {
-        return std::string(pathBuffer);
-    }
-
-    // 3. Centralized folder
+    // 3. Centralized folder in %LOCALAPPDATA%
     std::string central = GetCentralFolder();
     if (!central.empty()) {
         std::string centralPath = central + "\\ffmpeg.exe";
         if (FileExists(centralPath)) {
             return centralPath;
         }
+    }
+
+    // 4. System PATH
+    char pathBuffer[MAX_PATH];
+    if (SearchPathA(NULL, "ffmpeg", ".exe", MAX_PATH, pathBuffer, NULL) > 0) {
+        return std::string(pathBuffer);
     }
 
     return "";
@@ -69,7 +117,8 @@ static bool DownloadFileWinInet(HWND hWndParent, const std::string& url, const s
         return false;
     }
     
-    HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE, 0);
+    DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS;
+    HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0, flags, 0);
     if (!hUrl) {
         InternetCloseHandle(hInternet);
         return false;
@@ -148,6 +197,7 @@ static bool RunCommandHidden(const std::string& command) {
     }
 
     WaitForSingleObject(pi.hProcess, INFINITE);
+
     DWORD exitCode = 0;
     GetExitCodeProcess(pi.hProcess, &exitCode);
 
@@ -158,61 +208,68 @@ static bool RunCommandHidden(const std::string& command) {
 }
 
 bool SetupDependencies(HWND hWndParent, std::atomic<bool>& cancelFlag) {
+    std::string appDir = GetAppDir();
     std::string central = GetCentralFolder();
-    if (central.empty()) {
-        return false;
-    }
 
+    // 1. Check if yt-dlp is available
     if (GetYtDlpPath().empty()) {
-        std::string* pMsg = new std::string("Setting up Python Engine... Please wait (this is a one-time setup).");
+        std::string* pMsg = new std::string("Downloading yt-dlp core engine...");
         PostMessage(hWndParent, WM_DOWNLOAD_PROGRESS, (WPARAM)0, (LPARAM)pMsg);
-        
-        std::string pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip";
-        std::string targetPythonZip = central + "\\python.zip";
-        if (!DownloadFileWinInet(hWndParent, pythonUrl, targetPythonZip, "Python Engine", cancelFlag)) {
-            return false;
+
+        std::string ytDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+        std::string targetExe = appDir + "\\yt-dlp.exe";
+
+        bool downloaded = DownloadFileWinInet(hWndParent, ytDlpUrl, targetExe, "yt-dlp engine", cancelFlag);
+        if (!downloaded && !central.empty()) {
+            targetExe = central + "\\yt-dlp.exe";
+            downloaded = DownloadFileWinInet(hWndParent, ytDlpUrl, targetExe, "yt-dlp engine", cancelFlag);
         }
 
-        pMsg = new std::string("Configuring Python and installing yt-dlp + WPC Plugin... This may take a minute.");
-        PostMessage(hWndParent, WM_DOWNLOAD_PROGRESS, (WPARAM)20, (LPARAM)pMsg);
-
-        std::string setupCmd = "powershell -Command \"Set-Location -Path '" + central + "'; " +
-            "Expand-Archive -Path 'python.zip' -DestinationPath 'python' -Force; " +
-            "(Get-Content -Path 'python\\python311._pth') -replace '#import site', 'import site' | Set-Content -Path 'python\\python311._pth'; " +
-            "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'python\\get-pip.py'; " +
-            ".\\python\\python.exe .\\python\\get-pip.py --no-warn-script-location; " +
-            ".\\python\\python.exe -m pip install yt-dlp yt-dlp-getpot-wpc nodriver --no-warn-script-location; " +
-            "(Get-Content -Path '.\\python\\Lib\\site-packages\\yt_dlp_plugins\\extractor\\getpot_wpc.py') -replace 'headless=False', 'headless=True' | Set-Content -Path '.\\python\\Lib\\site-packages\\yt_dlp_plugins\\extractor\\getpot_wpc.py'; " +
-            "Remove-Item -Force 'python.zip';\"";
-
-        if (!RunCommandHidden(setupCmd)) {
-            DeleteFileA(targetPythonZip.c_str());
-            return false;
+        if (!downloaded) {
+            // Fallback: Try curl.exe if available
+            std::string curlCmd = "curl.exe -fL -o \"" + targetExe + "\" \"" + ytDlpUrl + "\"";
+            if (!RunCommandHidden(curlCmd) || !FileExists(targetExe)) {
+                return false;
+            }
         }
     }
 
+    // 2. Check if ffmpeg is available
     if (GetFFmpegPath().empty()) {
-        std::string* pMsg = new std::string("Downloading FFmpeg audio/video merger... Please sit back and relax.");
+        std::string* pMsg = new std::string("Downloading FFmpeg audio/video merger...");
         PostMessage(hWndParent, WM_DOWNLOAD_PROGRESS, (WPARAM)0, (LPARAM)pMsg);
 
         std::string ffmpegUrl = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
-        std::string targetZip = central + "\\ffmpeg.zip";
-        if (!DownloadFileWinInet(hWndParent, ffmpegUrl, targetZip, "FFmpeg component", cancelFlag)) {
-            return false;
+        std::string targetDir = appDir;
+        std::string targetZip = targetDir + "\\ffmpeg.zip";
+
+        bool downloaded = DownloadFileWinInet(hWndParent, ffmpegUrl, targetZip, "FFmpeg component", cancelFlag);
+        if (!downloaded && !central.empty()) {
+            targetDir = central;
+            targetZip = targetDir + "\\ffmpeg.zip";
+            downloaded = DownloadFileWinInet(hWndParent, ffmpegUrl, targetZip, "FFmpeg component", cancelFlag);
         }
 
-        pMsg = new std::string("Extracting engine files... Preparing your downloader for first-time use!");
+        if (!downloaded) {
+            // Fallback via curl
+            std::string curlCmd = "curl.exe -fL -o \"" + targetZip + "\" \"" + ffmpegUrl + "\"";
+            if (!RunCommandHidden(curlCmd) || !FileExists(targetZip)) {
+                return false;
+            }
+        }
+
+        pMsg = new std::string("Extracting FFmpeg engine files...");
         PostMessage(hWndParent, WM_DOWNLOAD_PROGRESS, (WPARAM)50, (LPARAM)pMsg);
 
-        // PowerShell unzip, copy ffmpeg.exe to AppData directory and clean up
-        std::string extractCmd = "powershell -Command \"Set-Location -Path '" + central + "'; Expand-Archive -Path 'ffmpeg.zip' -DestinationPath 'temp_ffmpeg' -Force; Get-ChildItem -Path 'temp_ffmpeg' -Filter 'ffmpeg.exe' -Recurse | Copy-Item -Destination '.'; Remove-Item -Recurse -Force 'temp_ffmpeg', 'ffmpeg.zip'\"";
+        std::string extractCmd = "powershell -NoProfile -Command \"Expand-Archive -Path '" + targetZip + "' -DestinationPath '" + targetDir + "\\temp_ffmpeg' -Force; " +
+            "Get-ChildItem -Path '" + targetDir + "\\temp_ffmpeg' -Filter 'ffmpeg.exe' -Recurse | Copy-Item -Destination '" + targetDir + "'; " +
+            "Remove-Item -Recurse -Force '" + targetDir + "\\temp_ffmpeg', '" + targetZip + "'\"";
+        
         if (!RunCommandHidden(extractCmd)) {
-            // Cleanup zip on failure
             DeleteFileA(targetZip.c_str());
             return false;
         }
-        
-        // Double check it succeeded
+
         if (GetFFmpegPath().empty()) {
             return false;
         }
@@ -291,18 +348,33 @@ bool DownloadVideo(HWND hWndParent,
                   std::atomic<bool>& cancelFlag) {
                       
     (void)forceMp3; // Suppress unused parameter warning
-    CreateDirectoryA("downloads", NULL);
+    std::string downloadsDir = GetDownloadsDir();
 
-    std::string ytDlpPath = GetYtDlpPath(); // This is now python.exe
+    std::string ytDlpPath = GetYtDlpPath();
     std::string ffmpegPath = GetFFmpegPath();
 
-    std::string cmd = "\"" + ytDlpPath + "\" -m yt_dlp --update --newline --no-cache-dir --js-runtimes node --remote-components ejs:github --extractor-args \"youtube:player_client=web_embedded,web,android\" --extractor-args \"youtube-wpc:mint_player=True\" --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
+    if (ytDlpPath.empty()) {
+        std::string* pErr = new std::string("yt-dlp engine not found. Please verify yt-dlp.exe is present.");
+        PostMessage(hWndParent, WM_DOWNLOAD_COMPLETE, 0, (LPARAM)pErr);
+        return false;
+    }
+
+    std::string cmd = "\"" + ytDlpPath + "\" --newline --no-cache-dir --progress --concurrent-fragments 16 --progress-template \"[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s\" ";
     
+    // Check for Node.js JS runtime to solve YouTube JS challenges seamlessly
+    char nodePathBuffer[MAX_PATH];
+    if (SearchPathA(NULL, "node", ".exe", MAX_PATH, nodePathBuffer, NULL) > 0 ||
+        FileExists("C:\\Program Files\\nodejs\\node.exe")) {
+        cmd += "--js-runtimes node ";
+    }
+
     if (!ffmpegPath.empty()) {
         size_t lastSlash = ffmpegPath.find_last_of("\\/");
         if (lastSlash != std::string::npos) {
             std::string ffmpegDir = ffmpegPath.substr(0, lastSlash);
             cmd += "--ffmpeg-location \"" + ffmpegDir + "\" ";
+        } else {
+            cmd += "--ffmpeg-location \"" + ffmpegPath + "\" ";
         }
     }
 
@@ -312,7 +384,7 @@ bool DownloadVideo(HWND hWndParent,
         cmd += "--no-playlist ";
     }
 
-    cmd += "-o \"downloads/%(title)s.%(ext)s\" ";
+    cmd += "-o \"" + downloadsDir + "/%(title)s.%(ext)s\" ";
 
     switch (qualityIndex) {
         case 0: cmd += "-S \"res,ext:mp4:m4a\" --merge-output-format mp4 "; break;
