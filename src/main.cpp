@@ -36,6 +36,7 @@
 #define IDC_THEME_LBL        1013
 #define IDC_MP3_LBL          1014
 #define IDC_PLAYLIST_LBL     1015
+#define IDC_CHECK_UPDATES_BTN 1016
 
 // Global UI Handles
 HWND g_hWnd = NULL;
@@ -50,6 +51,7 @@ HWND g_hStatusLabel = NULL;
 HWND g_hProgressBar = NULL;
 HWND g_hHistoryList = NULL;
 HWND g_hClearHistBtn = NULL;
+HWND g_hCheckUpdatesBtn = NULL;
 HWND g_hThemeChk = NULL;
 HWND g_hShowDownloadsBtn = NULL;
 
@@ -137,6 +139,15 @@ void ToggleTheme(HWND hWnd, BOOL isDark) {
     // Redraw window and child items
     InvalidateRect(hWnd, NULL, TRUE);
     EnumChildWindows(hWnd, RedrawChildProc, 0);
+}
+
+// Background worker thread for updating/verifying yt-dlp and ffmpeg
+DWORD WINAPI UpdateCheckThreadProc(LPVOID lpParam) {
+    HWND hWnd = (HWND)lpParam;
+    std::string report = CheckAndUpdateEngines(hWnd);
+    std::string* pReport = new std::string(report);
+    PostMessage(hWnd, WM_UPDATE_CHECK_DONE, 0, (LPARAM)pReport);
+    return 0;
 }
 
 // Background worker thread procedure using native Windows thread API
@@ -278,15 +289,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                                              20, 385, 540, 160, hWnd, (HMENU)IDC_HISTORY_LIST, NULL, NULL);
             SendMessage(g_hHistoryList, WM_SETFONT, (WPARAM)g_hFont, TRUE);
 
+            // Show Downloads Button
+            g_hShowDownloadsBtn = CreateWindowExA(0, "BUTTON", "Show Downloads Folder", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
+                                                 20, 555, 160, 25, hWnd, (HMENU)IDC_SHOW_DOWNLOADS_BTN, NULL, NULL);
+            SendMessage(g_hShowDownloadsBtn, WM_SETFONT, (WPARAM)g_hFont, TRUE);
+
+            // Check for Updates Button (beside Clear History)
+            g_hCheckUpdatesBtn = CreateWindowExA(0, "BUTTON", "Check for Updates", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
+                                                295, 555, 135, 25, hWnd, (HMENU)IDC_CHECK_UPDATES_BTN, NULL, NULL);
+            SendMessage(g_hCheckUpdatesBtn, WM_SETFONT, (WPARAM)g_hFont, TRUE);
+
             // Clear History Button
             g_hClearHistBtn = CreateWindowExA(0, "BUTTON", "Clear History", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
                                               440, 555, 120, 25, hWnd, (HMENU)IDC_CLEAR_HIST_BTN, NULL, NULL);
             SendMessage(g_hClearHistBtn, WM_SETFONT, (WPARAM)g_hFont, TRUE);
-
-            // Show Downloads Button
-            g_hShowDownloadsBtn = CreateWindowExA(0, "BUTTON", "Show Downloads Folder", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
-                                                 20, 555, 170, 25, hWnd, (HMENU)IDC_SHOW_DOWNLOADS_BTN, NULL, NULL);
-            SendMessage(g_hShowDownloadsBtn, WM_SETFONT, (WPARAM)g_hFont, TRUE);
 
             // Populate History
             RefreshHistoryList(g_hHistoryList);
@@ -400,6 +416,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     EnableWindow(g_hPlaylistChk, FALSE);
                     EnableWindow(g_hClearHistBtn, FALSE);
                     EnableWindow(g_hShowDownloadsBtn, FALSE);
+                    EnableWindow(g_hCheckUpdatesBtn, FALSE);
                     EnableWindow(g_hCancelBtn, TRUE);
 
                     SendMessage(g_hProgressBar, PBM_SETPOS, 0, 0);
@@ -425,6 +442,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     if (MessageBoxA(hWnd, "Are you sure you want to clear your download history?", "Clear History", MB_YESNO | MB_ICONQUESTION) == IDYES) {
                         ClearHistoryFile();
                         RefreshHistoryList(g_hHistoryList);
+                    }
+                    break;
+                }
+
+                case IDC_CHECK_UPDATES_BTN: {
+                    if (g_Downloading) break;
+                    EnableWindow(g_hCheckUpdatesBtn, FALSE);
+                    SetWindowTextA(g_hStatusLabel, "Status: Checking for updates to yt-dlp & FFmpeg...");
+                    HANDLE hUpdThread = CreateThread(NULL, 0, UpdateCheckThreadProc, hWnd, 0, NULL);
+                    if (hUpdThread) {
+                        CloseHandle(hUpdThread);
                     }
                     break;
                 }
@@ -462,6 +490,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             EnableWindow(g_hPlaylistChk, TRUE);
             EnableWindow(g_hClearHistBtn, TRUE);
             EnableWindow(g_hShowDownloadsBtn, TRUE);
+            EnableWindow(g_hCheckUpdatesBtn, TRUE);
             EnableWindow(g_hCancelBtn, FALSE);
 
             std::string qualStr = GetQualityLabel(g_CurrentQuality);
@@ -492,6 +521,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             }
 
             RefreshHistoryList(g_hHistoryList);
+            return 0;
+        }
+
+        case WM_UPDATE_CHECK_DONE: {
+            EnableWindow(g_hCheckUpdatesBtn, TRUE);
+            SetWindowTextA(g_hStatusLabel, "Status: Ready");
+            std::string* pReport = (std::string*)lParam;
+            if (pReport) {
+                MessageBoxA(hWnd, pReport->c_str(), "Engine Updates", MB_OK | MB_ICONINFORMATION);
+                delete pReport;
+            }
             return 0;
         }
 

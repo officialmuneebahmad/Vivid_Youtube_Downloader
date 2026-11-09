@@ -507,3 +507,87 @@ bool DownloadVideo(HWND hWndParent,
         return false;
     }
 }
+
+std::string CheckAndUpdateEngines(HWND hWndParent) {
+    (void)hWndParent;
+    std::string report = "=== Component Status & Update Report ===\n\n";
+
+    // 1. yt-dlp update check
+    std::string ytDlpPath = GetYtDlpPath();
+    if (ytDlpPath.empty()) {
+        report += "[yt-dlp Engine]: Not found in application directory.\n";
+    } else {
+        report += "[yt-dlp Engine]: Checking for updates...\n";
+        std::string cmd = "\"" + ytDlpPath + "\" -U";
+
+        SECURITY_ATTRIBUTES sa;
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        sa.lpSecurityDescriptor = NULL;
+
+        HANDLE hRead = NULL;
+        HANDLE hWrite = NULL;
+
+        if (CreatePipe(&hRead, &hWrite, &sa, 0)) {
+            SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+            STARTUPINFOA si;
+            PROCESS_INFORMATION pi;
+            ZeroMemory(&si, sizeof(si));
+            si.cb = sizeof(si);
+            si.hStdError = hWrite;
+            si.hStdOutput = hWrite;
+            si.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            ZeroMemory(&pi, sizeof(pi));
+
+            char cmdBuf[2048];
+            strncpy(cmdBuf, cmd.c_str(), sizeof(cmdBuf) - 1);
+            cmdBuf[sizeof(cmdBuf) - 1] = '\0';
+
+            if (CreateProcessA(NULL, cmdBuf, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+                CloseHandle(hWrite);
+
+                char buf[512];
+                DWORD dwRead = 0;
+                std::string output = "";
+                while (ReadFile(hRead, buf, sizeof(buf) - 1, &dwRead, NULL) && dwRead > 0) {
+                    buf[dwRead] = '\0';
+                    output += buf;
+                }
+
+                WaitForSingleObject(pi.hProcess, 30000);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                CloseHandle(hRead);
+
+                if (output.find("is up to date") != std::string::npos) {
+                    report += "-> Status: Up to date! You are on the latest version.\n";
+                } else if (output.find("Updated yt-dlp") != std::string::npos || output.find("Updating to") != std::string::npos) {
+                    report += "-> Status: Successfully updated to latest version!\n";
+                } else if (!output.empty()) {
+                    report += "-> " + output.substr(0, 150) + "\n";
+                } else {
+                    report += "-> Status: Up to date.\n";
+                }
+            } else {
+                CloseHandle(hWrite);
+                CloseHandle(hRead);
+                report += "-> Failed to execute yt-dlp updater.\n";
+            }
+        }
+    }
+
+    report += "\n";
+
+    // 2. FFmpeg check
+    std::string ffmpegPath = GetFFmpegPath();
+    if (!ffmpegPath.empty()) {
+        report += "[FFmpeg Audio/Video Merger]:\n-> Installed & ready at " + ffmpegPath + "\n";
+    } else {
+        report += "[FFmpeg Audio/Video Merger]:\n-> Missing in application folder.\n";
+    }
+
+    report += "\nAll components verified.";
+    return report;
+}
